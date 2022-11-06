@@ -1,6 +1,7 @@
 package com.morghttpclient;
 
 import com.google.inject.Provides;
+import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.events.GameTick;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -10,6 +11,8 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.*;
 import java.net.InetSocketAddress;
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
@@ -23,6 +26,8 @@ import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.http.api.RuneLiteAPI;
+
+import static net.runelite.api.Perspective.localToCanvas;
 
 @PluginDescriptor(
 	name = "Morg HTTP Client",
@@ -66,6 +71,7 @@ public class HttpServerPlugin extends Plugin
 		server.createContext("/inv", handlerForInv(InventoryID.INVENTORY));
 		server.createContext("/equip", handlerForInv(InventoryID.EQUIPMENT));
 		server.createContext("/events", this::handleEvents);
+		server.createContext("/npc", this::handleNPC);
 		server.setExecutor(Executors.newSingleThreadExecutor());
 		startTime = System.currentTimeMillis();
 		xp_gained_skills = new int[Skill.values().length];
@@ -149,6 +155,55 @@ public class HttpServerPlugin extends Plugin
 		}
 	}
 
+	public void handleNPC(HttpExchange exchange) throws IOException
+	{
+
+		List<NPC> npcs = client.getNpcs();
+		Player player = client.getLocalPlayer();
+
+		JsonObject object = new JsonObject();
+		int[] localXY = new int[]{0, 0};
+		int i;
+		i = 0;
+		for (NPC npc : npcs)
+		{
+
+			if (npc != null)
+			{
+				JsonObject npc = new JsonObject();
+				NPCComposition composition = npc.getComposition();
+				if (player.getLocalLocation().distanceTo(npc.getLocalLocation()) <= MAX_DISTANCE)
+				{
+					LocalPoint npcLocation = npc.getLocalLocation();
+					int playerPlane = player.getWorldLocation().getPlane();
+					Point npcCanvasFinal = localToCanvas(client, npcLocation, playerPlane);
+					localXY = new int[]{npcCanvasFinal.getX(), npcCanvasFinal.getY()};
+					if (localXY[0] > 1 && localXY[0] < MAX_DISTANCE)
+					{
+						if (localXY[1] > 1 && localXY[1] < MAX_DISTANCE)
+						{
+							String name = npc.getName() + "_" + i;
+
+							npc.addProperty("x1", localXY[0]);
+							npc.addProperty("y1", localXY[1]);
+							npc.addProperty("x2", npc.getWorldLocation().getX());
+							npc.addProperty("y2", npc.getWorldLocation().getY());
+
+							object.addProperty(name, npc);
+						}
+
+					}
+				}
+			}
+			i = i +1;
+		}
+		exchange.sendResponseHeaders(200, 0);
+		try (OutputStreamWriter out = new OutputStreamWriter(exchange.getResponseBody()))
+		{
+			RuneLiteAPI.GSON.toJson(object, out);
+		}
+	}
+
 	public void handleEvents(HttpExchange exchange) throws IOException
 	{
 		MAX_DISTANCE = config.reachedDistance();
@@ -207,7 +262,9 @@ public class HttpServerPlugin extends Plugin
 		object.addProperty("animation", player.getAnimation());
 		object.addProperty("animation pose", player.getPoseAnimation());
 		object.addProperty("run energy", client.getEnergy());
-		object.addProperty("game tick", client.getGameCycle());
+		object.addProperty("prayer", client.getBoostedSkillLevel(Skill.PRAYER) + "/" + client.getRealSkillLevel(Skill.PRAYER));
+		object.addProperty("specialAttack", client.getVar(VarPlayer.SPECIAL_ATTACK_PERCENT);
+		object.addProperty("gameTick", client.getTickCount());
 		object.addProperty("health", client.getBoostedSkillLevel(Skill.HITPOINTS) + "/" + client.getRealSkillLevel(Skill.HITPOINTS));
 		object.addProperty("interacting code", String.valueOf(player.getInteracting()));
 		object.addProperty("npc name", npcName);
